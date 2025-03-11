@@ -1,14 +1,23 @@
+/**
+ * Slackからのリクエストを処理する
+ * @param {Object} e POSTリクエストイベントオブジェクト
+ * @return {TextOutput} JSONレスポンス
+ */
 function doPost(e) {
   // リクエストパラメータをJSONとしてパース
-  let params = JSON.parse(e.postData.contents);
+  const params = JSON.parse(e.postData.contents);
   
-  // Slack Bot用のレスポンス
-  let response = {
+  // チャレンジ認証の場合
+  if (params.type === 'url_verification') {
+    return ContentService.createTextOutput(params.challenge);
+  }
+  
+  // その他のリクエストの場合（現時点では実装しない）
+  const response = {
     "response_type": "in_channel",
     "text": "Hello World!"
   };
   
-  // レスポンスを返す
   return ContentService.createTextOutput(JSON.stringify(response))
     .setMimeType(ContentService.MimeType.JSON);
 }
