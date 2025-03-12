@@ -1,0 +1,26 @@
+{
+  "name": "slack-gas-calendar-scheduling",
+  "version": "1.0.0",
+  "description": "SlackからGoogleカレンダーの予定を調整するためのGoogle Apps Scriptプロジェクト",
+  "main": "app.gs",
+  "scripts": {
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "deploy": "clasp deploy",
+    "open": "clasp open"
+  },
+  "dependencies": {
+    "@google/clasp": "^2.4.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryoma116/slack-gas-calendar-scheduling.git"
+  },
+  "keywords": [
+    "google-apps-script",
+    "slack",
+    "calendar"
+  ],
+  "author": "ryoma116",
+  "license": "MIT"
+}
