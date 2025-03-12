@@ -49,7 +49,7 @@ npx clasp login
 ```
 
 4. Google Apps Script APIの有効化
-   - [Google Cloud Console](https://console.cloud.google.com/apis/library/script.googleapis.com) にアクセス
+   - [Google Apps Script Settings](https://script.google.com/home/usersettings) にアクセス
    - Google Apps Script APIを有効化
 
 ### 2. プロジェクトのセットアップ
