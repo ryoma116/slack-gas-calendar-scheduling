@@ -22,3 +22,6 @@ token.json
 !.vscode/launch.json
 !.vscode/extensions.json
 *.code-workspace
+
+# History directory
+.history/
