@@ -18,15 +18,15 @@ source ~/.zshrc
 
 2. Node.jsのインストールと設定
 ```bash
-# Node.js v22.0をインストール
-nodenv install 22.0
+# Node.js v22.14.0をインストール
+nodenv install 22.14.0
 
 # プロジェクトディレクトリの作成と移動
 mkdir slack-gas-calendar-scheduling
 cd slack-gas-calendar-scheduling
 
-# プロジェクトでNode.js v22.0を使用するように設定
-nodenv local 22.0
+# プロジェクトでNode.js v22.14.0を使用するように設定
+nodenv local 22.14.0
 
 # npm初期化
 npm init -y
@@ -133,7 +133,7 @@ npx clasp deploy
 ## トラブルシューティング
 
 ### デプロイ時の注意点
-- Node.jsのバージョンが22.0であることを確認（`node -v`）
+- Node.jsのバージョンが22.14.0であることを確認（`node -v`）
 - GASの実行権限は適切に設定されているか確認
 - Slackアプリのイベント設定が正しいか確認
 - `.clasprc.json`が正しく設定されているか確認
@@ -143,4 +143,4 @@ npx clasp deploy
 - 403エラー：Google Apps Script APIが有効化されているか確認
 - タイムアウト：処理時間を確認
 - プッシュエラー：`.clasp.json`のscriptIdが正しいか確認
-- Node.jsバージョンエラー：`nodenv local 22.0`で正しいバージョンを設定
+- Node.jsバージョンエラー：`nodenv local 22.14.0`で正しいバージョンを設定
