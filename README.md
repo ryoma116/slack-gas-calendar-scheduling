@@ -2,6 +2,11 @@
 
 SlackからGoogleカレンダーの予定を調整するためのGoogle Apps Scriptプロジェクト
 
+## URLs
+
+- [Google Apps Script ホームページ](https://script.google.com/home)
+- [Google Apps Script Settings](https://script.google.com/home/usersettings)
+
 ## デプロイ手順
 
 ### 1. 開発環境のセットアップ
