@@ -4,6 +4,7 @@ SlackからGoogleカレンダーの予定を調整するためのGoogle Apps Scr
 
 ## URLs
 
+- [Github](https://github.com/ryoma116/slack-gas-calendar-scheduling)
 - [Google Apps Script ホームページ](https://script.google.com/home)
 - [Google Apps Script Settings](https://script.google.com/home/usersettings)
 
