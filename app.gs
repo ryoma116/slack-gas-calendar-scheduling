@@ -54,12 +54,22 @@ function handleMessage(message) {
   // メッセージテキストの取得
   const text = message.text || '';
   
+  // blocksからメンションされているユーザーのリストを抽出
+  const mentionedUsers = extractMentionedUsersFromBlocks(message.blocks);
+  
   // 予定作成のリクエストかどうかを判断する（例：予定作成 or 日程調整 という文字列を含む場合）
   if (text.includes('予定作成') || text.includes('日程調整')) {
+    // メンションされているユーザーがいる場合は、その情報も含めて応答
+    let responseText = "予定作成のリクエストを受け付けました。詳細を教えてください（日時、タイトル、参加者など）";
+    
+    if (mentionedUsers.length > 0) {
+      responseText += "\n\n参加者として以下のユーザーが検出されました：\n• <@" + mentionedUsers.join(">\n• <@") + ">";
+    }
+    
     // 予定作成リクエストに応答（元のメッセージのスレッドに返信）
     sendSlackMessage(
       message.channel, 
-      "予定作成のリクエストを受け付けました。詳細を教えてください（日時、タイトル、参加者など）", 
+      responseText, 
       message.ts // 元のメッセージのタイムスタンプを指定してスレッド返信
     );
     return;
@@ -139,4 +149,40 @@ function sendSlackMessage(channel, text, thread_ts) {
   } catch (error) {
     console.error('Slackメッセージの送信中にエラーが発生しました: ' + error);
   }
+}
+
+/**
+ * SlackメッセージのblocksからメンションされているユーザーIDのリストを抽出する
+ * @param {Array} blocks Slackメッセージのブロック配列
+ * @return {string[]} メンションされているユーザーIDの配列
+ */
+function extractMentionedUsersFromBlocks(blocks) {
+  if (!blocks || !Array.isArray(blocks)) return [];
+  
+  const mentionedUsers = [];
+  // ボット自身のIDを取得
+  const botUserId = PropertiesService.getScriptProperties().getProperty('BOT_USER_ID');
+  
+  for (const block of blocks) {
+    // elementsを持たないブロックはスキップ
+    if (!block.elements || !Array.isArray(block.elements)) continue;
+    
+    for (const element of block.elements) {
+      // rich_text_section以外はスキップ
+      if (element.type !== 'rich_text_section' || !element.elements || !Array.isArray(element.elements)) continue;
+      
+      for (const item of element.elements) {
+        // userタイプ以外はスキップ
+        if (item.type !== 'user' || !item.user_id) continue;
+        
+        // ボット自身は除外
+        if (item.user_id === botUserId) continue;
+        
+        mentionedUsers.push(item.user_id);
+      }
+    }
+  }
+  
+  // 重複を除去して返す
+  return [...new Set(mentionedUsers)];
 }
