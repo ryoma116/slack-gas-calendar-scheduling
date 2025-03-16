@@ -56,13 +56,21 @@ function handleMessage(message) {
   
   // 予定作成のリクエストかどうかを判断する（例：予定作成 or 日程調整 という文字列を含む場合）
   if (text.includes('予定作成') || text.includes('日程調整')) {
-    // 予定作成リクエストに応答
-    sendSlackMessage(message.channel, "予定作成のリクエストを受け付けました。詳細を教えてください（日時、タイトル、参加者など）");
+    // 予定作成リクエストに応答（元のメッセージのスレッドに返信）
+    sendSlackMessage(
+      message.channel, 
+      "予定作成のリクエストを受け付けました。詳細を教えてください（日時、タイトル、参加者など）", 
+      message.ts // 元のメッセージのタイムスタンプを指定してスレッド返信
+    );
     return;
   }
   
   // その他のメッセージの場合
-  sendSlackMessage(message.channel, "こんにちは！予定作成や日程調整をご希望の場合は、「予定作成」または「日程調整」と入力してください。");
+  sendSlackMessage(
+    message.channel, 
+    "こんにちは！予定作成や日程調整をご希望の場合は、「予定作成」または「日程調整」と入力してください。", 
+    message.ts // 元のメッセージのタイムスタンプを指定してスレッド返信
+  );
 }
 
 /**
@@ -87,11 +95,12 @@ function handleCommand(command) {
 }
 
 /**
- * Slackにメッセージを送信する
+ * Slackにメッセージを送信する（オプションでスレッド返信も可能）
  * @param {string} channel チャンネルID
  * @param {string} text 送信するテキスト
+ * @param {string} [thread_ts] スレッドタイムスタンプ（指定するとスレッド返信になります）
  */
-function sendSlackMessage(channel, text) {
+function sendSlackMessage(channel, text, thread_ts) {
   // SlackのBotトークンを取得（PropertiesServiceに保存しておく必要があります）
   const token = PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN');
   
@@ -100,11 +109,17 @@ function sendSlackMessage(channel, text) {
     return;
   }
   
+  // ペイロードの基本部分
   const payload = {
     'token': token,
     'channel': channel,
     'text': text
   };
+  
+  // スレッド返信の場合はthread_tsを追加
+  if (thread_ts) {
+    payload.thread_ts = thread_ts;
+  }
   
   const options = {
     'method': 'post',
@@ -119,6 +134,8 @@ function sendSlackMessage(channel, text) {
     if (!responseData.ok) {
       console.error('Slackメッセージの送信に失敗しました: ' + responseData.error);
     }
+    
+    return responseData; // レスポンスを返す（必要に応じて使用可能）
   } catch (error) {
     console.error('Slackメッセージの送信中にエラーが発生しました: ' + error);
   }
