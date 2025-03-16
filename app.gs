@@ -16,6 +16,7 @@ function doPost(e) {
   if (params.type === 'event_callback') {
     // まず200 OKを返す
     processEventAsync(params.event);
+    
     return ContentService.createTextOutput(JSON.stringify({ ok: true }))
       .setMimeType(ContentService.MimeType.JSON);
   }
@@ -81,6 +82,7 @@ function handleMessage(message) {
       responseText, 
       message.ts // 元のメッセージのタイムスタンプを指定してスレッド返信
     );
+    
     return;
   }
   
@@ -153,6 +155,7 @@ function sendSlackMessage(channel, text, thread_ts) {
     return responseData; // レスポンスを返す（必要に応じて使用可能）
   } catch (error) {
     console.error('Slackメッセージの送信中にエラーが発生しました: ' + error);
+    
     return null;
   }
 }
@@ -166,31 +169,44 @@ function extractMentionedUsersFromBlocks(blocks) {
   if (!blocks || !Array.isArray(blocks)) return [];
   
   const mentionedUsers = [];
-  // ボット自身のIDを取得
   const botUserId = PropertiesService.getScriptProperties().getProperty('BOT_USER_ID');
   
   for (const block of blocks) {
-    // elementsを持たないブロックはスキップ
     if (!block.elements || !Array.isArray(block.elements)) continue;
     
     for (const element of block.elements) {
-      // rich_text_section以外はスキップ
-      if (element.type !== 'rich_text_section' || !element.elements || !Array.isArray(element.elements)) continue;
-      
-      for (const item of element.elements) {
-        // userタイプ以外はスキップ
-        if (item.type !== 'user' || !item.user_id) continue;
-        
-        // ボット自身は除外
-        if (item.user_id === botUserId) continue;
-        
-        mentionedUsers.push(item.user_id);
-      }
+      if (!isValidRichTextSection(element)) continue;
+      extractUserMentionsFromElements(element.elements, botUserId, mentionedUsers);
     }
   }
   
-  // 重複を除去して返す
   return [...new Set(mentionedUsers)];
+}
+
+/**
+ * rich_text_sectionの要素が有効かチェックする
+ * @param {Object} element 要素オブジェクト
+ * @return {boolean} 有効な場合はtrue
+ */
+function isValidRichTextSection(element) {
+  return element.type === 'rich_text_section' && 
+         element.elements && 
+         Array.isArray(element.elements);
+}
+
+/**
+ * 要素からユーザーメンションを抽出する
+ * @param {Array} elements 要素の配列
+ * @param {string} botUserId ボットのユーザーID
+ * @param {Array} mentionedUsers メンション済みユーザーの配列
+ */
+function extractUserMentionsFromElements(elements, botUserId, mentionedUsers) {
+  for (const item of elements) {
+    if (item.type !== 'user' || !item.user_id) continue;
+    if (item.user_id === botUserId) continue;
+    
+    mentionedUsers.push(item.user_id);
+  }
 }
 
 /**
@@ -216,12 +232,14 @@ function getSlackUserInfo(userId) {
     
     if (!responseData.ok) {
       console.error('Slackユーザー情報の取得に失敗しました: ' + responseData.error);
+      
       return null;
     }
     
     return responseData.user;
   } catch (error) {
     console.error('Slackユーザー情報の取得中にエラーが発生しました: ' + error);
+    
     return null;
   }
 }
