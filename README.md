@@ -13,6 +13,7 @@ SlackからGoogleカレンダーの予定を調整するためのGoogle Apps Scr
 ### 1. 開発環境のセットアップ
 
 1. プロジェクトのクローン
+
 ```bash
 # リポジトリのクローン
 git clone https://github.com/ryoma116/slack-gas-calendar-scheduling.git
@@ -20,6 +21,7 @@ cd slack-gas-calendar-scheduling
 ```
 
 2. nodenvのインストール（まだの場合）
+
 ```bash
 # macOSの場合
 brew install nodenv
@@ -30,6 +32,7 @@ source ~/.zshrc
 ```
 
 2. Node.jsのインストールと設定
+
 ```bash
 # Node.js v22.14.0をインストール
 nodenv install 22.14.0
@@ -46,6 +49,7 @@ npm init -y
 ```
 
 3. [clasp](https://github.com/google/clasp)のインストールと認証
+
 ```bash
 # claspをプロジェクトにインストール
 npm install @google/clasp
@@ -134,12 +138,14 @@ npx clasp deploy
 ## トラブルシューティング
 
 ### デプロイ時の注意点
+
 - Node.jsのバージョンが22.14.0であることを確認（`node -v`）
 - GASの実行権限は適切に設定されているか確認
 - Slackアプリのイベント設定が正しいか確認
 - `.clasprc.json`が正しく設定されているか確認
 
 ### 一般的なエラー対応
+
 - 401エラー：`npx clasp login`で再認証を試す
 - 403エラー：Google Apps Script APIが有効化されているか確認
 - タイムアウト：処理時間を確認
