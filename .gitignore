@@ -25,3 +25,4 @@ token.json
 
 # History directory
 .history/
+node_modules

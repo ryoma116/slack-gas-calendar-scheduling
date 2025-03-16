@@ -7,7 +7,9 @@
     "push": "clasp push",
     "pull": "clasp pull",
     "deploy": "clasp deploy",
-    "open": "clasp open"
+    "open": "clasp open",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "@google/clasp": "^2.4.2"
@@ -22,5 +24,10 @@
     "calendar"
   ],
   "author": "ryoma116",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.26.1",
+    "@typescript-eslint/parser": "^8.26.1",
+    "eslint": "^8.56.0"
+  }
 }
