@@ -78,6 +78,38 @@ refs #1 feat: implement Slack challenge authentication
 - テスト手順（必要な場合）
 - スクリーンショット（UI変更がある場合）
 
+## プルリクエスト作成フロー
+
+### 1. ブランチの作成と切り替え
+```bash
+git checkout -b <type>/i<issue-number>-<description> main
+```
+
+### 2. 変更の実装
+必要な変更を実装します。
+
+### 3. 変更のコミット
+```bash
+git add .
+git commit -m "refs #<issue-number> <type>: <description>"
+```
+
+### 4. リモートへのプッシュ
+```bash
+git push origin <branch-name>
+```
+
+### 5. プルリクエストの作成
+GitHub CLIを使用してプルリクエストを作成します：
+```bash
+gh pr create --title "タイトル" --body "プルリクエストの説明"
+```
+
+#### プルリクエスト作成のTips
+- タイトルは日本語で簡潔に記述
+- PRの説明には、.github/pull_request_template.mdのテンプレートが自動的に使用されます
+- 必ず`closes #<issue-number>`を含めて、PRとIssueを紐付けます
+
 ## コードスタイル
 
 - インデントは2スペースを使用
