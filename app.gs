@@ -63,7 +63,16 @@ function handleMessage(message) {
     let responseText = "予定作成のリクエストを受け付けました。詳細を教えてください（日時、タイトル、参加者など）";
     
     if (mentionedUsers.length > 0) {
-      responseText += "\n\n参加者として以下のユーザーが検出されました：\n• <@" + mentionedUsers.join(">\n• <@") + ">";
+      // ユーザーIDからメールアドレスを取得
+      const emailMap = getUserEmailsFromIds(mentionedUsers);
+      
+      responseText += "\n\n参加者として以下のユーザーが検出されました：";
+      mentionedUsers.forEach(userId => {
+        responseText += `\n• <@${userId}>`;
+        if (emailMap[userId]) {
+          responseText += ` (${emailMap[userId]})`;
+        }
+      });
     }
     
     // 予定作成リクエストに応答（元のメッセージのスレッドに返信）
@@ -109,34 +118,30 @@ function handleCommand(command) {
  * @param {string} channel チャンネルID
  * @param {string} text 送信するテキスト
  * @param {string} [thread_ts] スレッドタイムスタンプ（指定するとスレッド返信になります）
+ * @return {Object|null} APIレスポンス、または失敗時はnull
  */
 function sendSlackMessage(channel, text, thread_ts) {
-  // SlackのBotトークンを取得（PropertiesServiceに保存しておく必要があります）
-  const token = PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN');
-  
-  if (!token) {
-    console.error('SLACK_BOT_TOKENが設定されていません。');
-    return;
-  }
-  
-  // ペイロードの基本部分
-  const payload = {
-    'token': token,
-    'channel': channel,
-    'text': text
-  };
-  
-  // スレッド返信の場合はthread_tsを追加
-  if (thread_ts) {
-    payload.thread_ts = thread_ts;
-  }
-  
-  const options = {
-    'method': 'post',
-    'payload': payload
-  };
-  
   try {
+    // SlackのBotトークンを取得（エラーが発生する可能性あり）
+    const token = getSlackBotToken();
+    
+    // ペイロードの基本部分
+    const payload = {
+      'token': token,
+      'channel': channel,
+      'text': text
+    };
+    
+    // スレッド返信の場合はthread_tsを追加
+    if (thread_ts) {
+      payload.thread_ts = thread_ts;
+    }
+    
+    const options = {
+      'method': 'post',
+      'payload': payload
+    };
+    
     // Slack APIを呼び出してメッセージを送信
     const response = UrlFetchApp.fetch('https://slack.com/api/chat.postMessage', options);
     const responseData = JSON.parse(response.getContentText());
@@ -148,6 +153,7 @@ function sendSlackMessage(channel, text, thread_ts) {
     return responseData; // レスポンスを返す（必要に応じて使用可能）
   } catch (error) {
     console.error('Slackメッセージの送信中にエラーが発生しました: ' + error);
+    return null;
   }
 }
 
@@ -185,4 +191,74 @@ function extractMentionedUsersFromBlocks(blocks) {
   
   // 重複を除去して返す
   return [...new Set(mentionedUsers)];
+}
+
+/**
+ * Slack APIを使用して特定のユーザーの情報を取得する
+ * @param {string} userId ユーザーID
+ * @return {Object|null} ユーザー情報のオブジェクト、またはエラー時はnull
+ */
+function getSlackUserInfo(userId) {
+  try {
+    // SlackのBotトークンを取得（エラーが発生する可能性あり）
+    const token = getSlackBotToken();
+    
+    const options = {
+      'method': 'get',
+      'headers': {
+        'Authorization': 'Bearer ' + token
+      }
+    };
+    
+    // Slack APIを呼び出してユーザー情報を取得
+    const response = UrlFetchApp.fetch(`https://slack.com/api/users.info?user=${userId}`, options);
+    const responseData = JSON.parse(response.getContentText());
+    
+    if (!responseData.ok) {
+      console.error('Slackユーザー情報の取得に失敗しました: ' + responseData.error);
+      return null;
+    }
+    
+    return responseData.user;
+  } catch (error) {
+    console.error('Slackユーザー情報の取得中にエラーが発生しました: ' + error);
+    return null;
+  }
+}
+
+/**
+ * ユーザーIDのリストからメールアドレスのマップを取得する
+ * @param {string[]} userIds Slackユーザーのリスト
+ * @return {Object} ユーザーIDをキー、メールアドレスを値とするオブジェクト
+ */
+function getUserEmailsFromIds(userIds) {
+  const emailMap = {};
+  
+  if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+    return emailMap;
+  }
+  
+  for (const userId of userIds) {
+    const userInfo = getSlackUserInfo(userId);
+    if (userInfo && userInfo.profile && userInfo.profile.email) {
+      emailMap[userId] = userInfo.profile.email;
+    }
+  }
+  
+  return emailMap;
+}
+
+/**
+ * SlackのBotトークンを取得する
+ * @return {string} SlackのBotトークン
+ * @throws {Error} トークンが設定されていない場合
+ */
+function getSlackBotToken() {
+  const token = PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN');
+  
+  if (!token) {
+    throw new Error('SLACK_BOT_TOKENが設定されていません。');
+  }
+  
+  return token;
 }
