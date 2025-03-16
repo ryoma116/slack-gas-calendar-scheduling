@@ -57,8 +57,7 @@ refs #<issue-number>
 
 ### 例
 ```
-refs #1
-feat: implement Slack challenge authentication
+refs #1 feat: implement Slack challenge authentication
 
 - Add URL verification endpoint
 - Handle challenge parameter
