@@ -52,19 +52,33 @@ function processEventAsync(event) {
  * @param {Object} message Slackメッセージオブジェクト
  */
 function handleMessage(message) {
-  // メッセージテキストの取得
+  // メッセージテキストとメンションユーザーの取得
   const text = message.text || '';
-  
-  // blocksからメンションされているユーザーのリストを抽出
   const mentionedUsers = extractMentionedUsersFromBlocks(message.blocks);
+
+  // メンションされたユーザーの予定を取得するリクエストの場合
+  if (text.includes('予定確認') || text.includes('予定を確認')) {
+    const emailMap = getUserEmailsFromIds(mentionedUsers);
+    let responseText = "";
+
+    for (const [userId, email] of Object.entries(emailMap)) {
+      const events = getUserCalendarEvents(email);
+      responseText += `\n\n<@${userId}>の今日の予定:\n${formatEvents(events)}`;
+    }
+
+    if (responseText === "") {
+      responseText = "メンションされたユーザーの予定を取得できませんでした。";
+    }
+
+    sendSlackMessage(message.channel, responseText, message.ts);
+    return;
+  }
   
-  // 予定作成のリクエストかどうかを判断する（例：予定作成 or 日程調整 という文字列を含む場合）
+  // 予定作成のリクエストかどうかを判断する
   if (text.includes('予定作成') || text.includes('日程調整')) {
-    // メンションされているユーザーがいる場合は、その情報も含めて応答
     let responseText = "予定作成のリクエストを受け付けました。詳細を教えてください（日時、タイトル、参加者など）";
     
     if (mentionedUsers.length > 0) {
-      // ユーザーIDからメールアドレスを取得
       const emailMap = getUserEmailsFromIds(mentionedUsers);
       
       responseText += "\n\n参加者として以下のユーザーが検出されました：";
@@ -76,21 +90,15 @@ function handleMessage(message) {
       });
     }
     
-    // 予定作成リクエストに応答（元のメッセージのスレッドに返信）
-    sendSlackMessage(
-      message.channel, 
-      responseText, 
-      message.ts // 元のメッセージのタイムスタンプを指定してスレッド返信
-    );
-    
+    sendSlackMessage(message.channel, responseText, message.ts);
     return;
   }
   
   // その他のメッセージの場合
   sendSlackMessage(
     message.channel, 
-    "こんにちは！予定作成や日程調整をご希望の場合は、「予定作成」または「日程調整」と入力してください。", 
-    message.ts // 元のメッセージのタイムスタンプを指定してスレッド返信
+    "こんにちは！予定作成や日程調整をご希望の場合は、「予定作成」または「日程調整」と入力してください。\n予定確認をご希望の場合は、「予定確認」と入力してください。", 
+    message.ts
   );
 }
 
@@ -279,4 +287,50 @@ function getSlackBotToken() {
   }
   
   return token;
+}
+
+/**
+ * 指定されたメールアドレスのユーザーの今日の予定を取得する
+ * @param {string} email ユーザーのメールアドレス
+ * @return {Object[]} 予定の配列
+ */
+function getUserCalendarEvents(email) {
+  try {
+    const calendar = CalendarApp.getCalendarById(email);
+    if (!calendar) {
+      console.error(`カレンダーが見つかりません: ${email}`);
+      return [];
+    }
+
+    const today = new Date();
+    const startTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+    const endTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+
+    const events = calendar.getEvents(startTime, endTime);
+    return events.map(event => ({
+      title: event.getTitle(),
+      startTime: event.getStartTime(),
+      endTime: event.getEndTime()
+    }));
+  } catch (error) {
+    console.error(`予定の取得中にエラーが発生しました: ${error}`);
+    return [];
+  }
+}
+
+/**
+ * 予定の配列をフォーマットしてテキストに変換する
+ * @param {Object[]} events 予定の配列
+ * @return {string} フォーマットされた予定テキスト
+ */
+function formatEvents(events) {
+  if (events.length === 0) {
+    return "予定はありません";
+  }
+
+  return events.map(event => {
+    const startTime = event.startTime.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const endTime = event.endTime.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    return `• ${startTime} - ${endTime}: ${event.title}`;
+  }).join("\n");
 }
