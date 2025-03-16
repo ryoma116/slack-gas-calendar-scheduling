@@ -55,9 +55,134 @@ function processEventAsync(event) {
  * @param {Object} message Slackメッセージオブジェクト
  */
 function handleMessage(message) {
-  // メッセージテキストとメンションユーザーの取得
   const text = message.text || '';
   const mentionedUsers = extractMentionedUsersFromBlocks(message.blocks);
+
+  if (mentionedUsers.length === 0) {
+    sendSlackMessage(
+      message.channel,
+      'メンションされたユーザーがいません。@メンションで予定を確認したいユーザーを指定してください。',
+      message.ts
+    );
+
+    return;
+  }
+
+  // MTGの日程調整リクエストの場合
+  if (text.includes('MTG') || text.includes('ミーティング')) {
+    const dateRange = extractDateRange(text);
+    const duration = extractMeetingDuration(text) || 60; // デフォルトは60分
+
+    if (!dateRange) {
+      sendSlackMessage(
+        message.channel,
+        '日付の指定が見つかりませんでした。「2024/1/1から2024/1/5」のような形式で指定してください。',
+        message.ts
+      );
+
+      return;
+    }
+
+    // メール情報を取得
+    const emailMap = getUserEmailsFromIds(mentionedUsers);
+    const allEvents = [];
+
+    // 期間内の各日付について予定を取得
+    const currentDate = new Date(dateRange.startDate);
+    while (currentDate <= dateRange.endDate) {
+      for (const email of Object.values(emailMap)) {
+        const events = getUserCalendarEvents(email, currentDate);
+        allEvents.push({
+          date: new Date(currentDate),
+          events: events,
+        });
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    // 空き時間を分析
+    const startDate = dateRange.startDate.toLocaleDateString('ja-JP');
+    const endDate = dateRange.endDate.toLocaleDateString('ja-JP');
+    const responseBase = [
+      '以下の条件で日程調整を行います：',
+      `• 期間: ${startDate} - ${endDate}`,
+      `• 所要時間: ${duration}分`,
+      '',
+      '参加者：',
+    ].join('\n');
+
+    let responseText = responseBase;
+    mentionedUsers.forEach(userId => {
+      responseText += `• <@${userId}>${emailMap[userId] ? ` (${emailMap[userId]})` : ''}\n`;
+    });
+
+    // 初期レスポンスを送信
+    responseText += '\n空き時間を分析中です...';
+    sendSlackMessage(message.channel, responseText, message.ts);
+
+    // 空き時間を分析して提案を生成
+    analyzeMeetingSlots(allEvents, dateRange.startDate, dateRange.endDate, duration)
+      .then(suggestion => {
+        sendSlackMessage(message.channel, suggestion, message.ts);
+      })
+      .catch(error => {
+        console.error('空き時間の分析中にエラーが発生しました:', error);
+        sendSlackMessage(
+          message.channel,
+          '申し訳ありません。空き時間の分析中にエラーが発生しました。',
+          message.ts
+        );
+      });
+
+    return;
+  }
+
+  // 空き時間を探すリクエストの場合
+  if (text.includes('空き時間') || text.includes('空いている時間')) {
+    const emailMap = getUserEmailsFromIds(mentionedUsers);
+    const today = new Date();
+    let allEvents = [];
+
+    // 各ユーザーの予定を取得
+    for (const email of Object.values(emailMap)) {
+      const events = getUserCalendarEvents(email);
+      allEvents = allEvents.concat(events);
+    }
+
+    // 空き時間を分析
+    const availableSlots = analyzeAvailableTimeSlots(allEvents, today);
+
+    if (availableSlots.length === 0) {
+      sendSlackMessage(
+        message.channel,
+        '今日は空き時間が見つかりませんでした。別の日を試してみてください。',
+        message.ts
+      );
+
+      return;
+    }
+
+    // デフォルトで1時間の会議を想定
+    const requiredDuration = 60;
+
+    // Gemini APIで最適な時間帯を提案
+    suggestBestTimeSlot(availableSlots, requiredDuration)
+      .then(suggestion => {
+        let responseText = '空き時間の分析結果:\n\n';
+        responseText += suggestion;
+        sendSlackMessage(message.channel, responseText, message.ts);
+      })
+      .catch(error => {
+        console.error('空き時間の分析中にエラーが発生しました:', error);
+        sendSlackMessage(
+          message.channel,
+          '申し訳ありません。空き時間の分析中にエラーが発生しました。',
+          message.ts
+        );
+      });
+
+    return;
+  }
 
   // メンションされたユーザーの予定を取得するリクエストの場合
   if (text.includes('予定確認') || text.includes('予定を確認')) {
@@ -87,16 +212,14 @@ function handleMessage(message) {
 
     let responseText = scheduleRequestMessage;
 
-    if (mentionedUsers.length > 0) {
-      const emailMap = getUserEmailsFromIds(mentionedUsers);
+    const emailMap = getUserEmailsFromIds(mentionedUsers);
+    responseText += '\n\n参加者として以下のユーザーが検出されました：';
 
-      responseText += '\n\n参加者として以下のユーザーが検出されました：';
-      mentionedUsers.forEach(userId => {
-        responseText += `\n• <@${userId}>`;
-        if (emailMap[userId]) {
-          responseText += ` (${emailMap[userId]})`;
-        }
-      });
+    for (const [userId, email] of Object.entries(emailMap)) {
+      responseText += `\n• <@${userId}>`;
+      if (email) {
+        responseText += ` (${email})`;
+      }
     }
 
     sendSlackMessage(message.channel, responseText, message.ts);
@@ -310,11 +433,12 @@ function getSlackBotToken() {
 }
 
 /**
- * 指定されたメールアドレスのユーザーの今日の予定を取得する
+ * 指定された日付のカレンダーイベントを取得する
  * @param {string} email ユーザーのメールアドレス
+ * @param {Date} [date] 対象日（指定がない場合は今日）
  * @return {Object[]} 予定の配列
  */
-function getUserCalendarEvents(email) {
+function getUserCalendarEvents(email, date) {
   try {
     const calendar = CalendarApp.getCalendarById(email);
     if (!calendar) {
@@ -323,9 +447,12 @@ function getUserCalendarEvents(email) {
       return [];
     }
 
-    const today = new Date();
-    const startTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
-    const endTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+    const targetDate = date || new Date();
+    const startTime = new Date(targetDate);
+    startTime.setHours(0, 0, 0, 0);
+
+    const endTime = new Date(targetDate);
+    endTime.setHours(23, 59, 59, 999);
 
     const events = calendar.getEvents(startTime, endTime);
 
@@ -365,4 +492,307 @@ function formatEvents(events) {
       return `• ${startTime} - ${endTime}: ${event.title}`;
     })
     .join('\n');
+}
+
+/**
+ * Gemini APIのアクセストークンを取得する
+ * @return {string} GeminiのAPIトークン
+ * @throws {Error} トークンが設定されていない場合
+ */
+function getGeminiApiKey() {
+  const token = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!token) {
+    throw new Error('GEMINI_API_KEYが設定されていません。');
+  }
+
+  return token;
+}
+
+/**
+ * 予定リストから空き時間を分析する
+ * @param {Object[]} events 予定の配列
+ * @param {Date} targetDate 対象日
+ * @return {Object[]} 空き時間の配列
+ */
+function analyzeAvailableTimeSlots(events, targetDate) {
+  // 営業時間を設定（9:00-18:00）
+  const startHour = 9;
+  const endHour = 18;
+
+  const start = new Date(targetDate);
+  start.setHours(startHour, 0, 0, 0);
+
+  const end = new Date(targetDate);
+  end.setHours(endHour, 0, 0, 0);
+
+  // 予定を時間順にソート
+  events.sort((a, b) => a.startTime - b.startTime);
+
+  const availableSlots = [];
+  let currentTime = start;
+
+  // 各予定間の空き時間を検出
+  for (const event of events) {
+    if (event.startTime > currentTime) {
+      availableSlots.push({
+        start: currentTime,
+        end: event.startTime,
+      });
+    }
+    currentTime = new Date(Math.max(currentTime.getTime(), event.endTime.getTime()));
+  }
+
+  // 最後の予定以降の空き時間
+  if (currentTime < end) {
+    availableSlots.push({
+      start: currentTime,
+      end: end,
+    });
+  }
+
+  return availableSlots;
+}
+
+/**
+ * 空き時間をGemini APIを使用して分析し、最適な時間帯を提案する
+ * @param {Object[]} availableSlots 空き時間の配列
+ * @param {number} requiredDuration 必要な時間（分）
+ * @return {Promise<string>} 最適な時間帯の提案
+ */
+async function suggestBestTimeSlot(availableSlots, requiredDuration) {
+  try {
+    const apiKey = getGeminiApiKey();
+    const url =
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+
+    // 空き時間の情報を整形
+    const slotsText = availableSlots
+      .map(slot => {
+        const startTime = slot.start.toLocaleTimeString('ja-JP', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        const endTime = slot.end.toLocaleTimeString('ja-JP', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+
+        return `${startTime}から${endTime}`;
+      })
+      .join('、');
+
+    const prompt = `
+    以下の条件で最適な会議時間を提案してください：
+    
+    空き時間枠：${slotsText}
+    必要な時間：${requiredDuration}分
+    
+    以下の点を考慮して提案してください：
+    - なるべく朝早い時間帯を優先
+    - 必要な時間が確保できる枠を選択
+    - 提案は「XX:XXからYY:XXが最適です」という形式で
+    `;
+
+    const options = {
+      method: 'post',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      payload: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      }),
+    };
+
+    const response = UrlFetchApp.fetch(url, options);
+    const result = JSON.parse(response.getContentText());
+
+    if (result.candidates && result.candidates[0].content.parts[0].text) {
+      return result.candidates[0].content.parts[0].text;
+    }
+
+    return '申し訳ありませんが、適切な時間帯を提案できませんでした。';
+  } catch (error) {
+    console.error('Gemini APIでのエラー:', error);
+
+    return '時間帯の分析中にエラーが発生しました。';
+  }
+}
+
+/**
+ * テキストからMTGの期間を抽出する
+ * @param {string} text メッセージテキスト
+ * @return {Object|null} 開始日と終了日のオブジェクト、または抽出できない場合はnull
+ */
+function extractDateRange(text) {
+  // YYYY/MM/DDからYYYY/MM/DDの間 のパターン
+  const rangePattern = /(\d{4}\/\d{1,2}\/\d{1,2})(?:から|〜|-)(\d{4}\/\d{1,2}\/\d{1,2})/;
+  const rangeMatch = text.match(rangePattern);
+
+  if (rangeMatch) {
+    return {
+      startDate: new Date(rangeMatch[1]),
+      endDate: new Date(rangeMatch[2]),
+    };
+  }
+
+  // YYYY/MM/DD のパターン（単日の場合）
+  const singlePattern = /(\d{4}\/\d{1,2}\/\d{1,2})/;
+  const singleMatch = text.match(singlePattern);
+
+  if (singleMatch) {
+    const date = new Date(singleMatch[1]);
+
+    return {
+      startDate: date,
+      endDate: date,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * テキストからMTG時間（分）を抽出する
+ * @param {string} text メッセージテキスト
+ * @return {number|null} 分単位の時間、または抽出できない場合はnull
+ */
+function extractMeetingDuration(text) {
+  // 時間のパターン（例: 30分, 1時間, 1.5時間）
+  const patterns = [
+    { regex: /(\d+)分/, multiplier: 1 },
+    { regex: /(\d+(?:\.\d+)?)時間/, multiplier: 60 },
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern.regex);
+    if (match) {
+      return Math.round(parseFloat(match[1]) * pattern.multiplier);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 複数ユーザーの空き時間を分析して最適な時間帯を提案する
+ * @param {Object[]} allEvents 全ユーザーの全日程の予定リスト
+ * @param {Date} startDate 開始日
+ * @param {Date} endDate 終了日
+ * @param {number} duration 必要な時間（分）
+ * @return {Promise<string>} 提案メッセージ
+ */
+async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
+  // 日付ごとの空き時間を分析
+  const dateSlots = {};
+  const currentDate = new Date(startDate);
+
+  while (currentDate <= endDate) {
+    const dateStr = currentDate.toISOString().split('T')[0];
+    const dayEvents = allEvents
+      .filter(e => e.date.toISOString().split('T')[0] === dateStr)
+      .map(e => e.events)
+      .flat();
+
+    const availableSlots = analyzeAvailableTimeSlots(dayEvents, currentDate);
+
+    // duration分以上の空き時間枠のみを抽出
+    const viableSlots = availableSlots.filter(slot => {
+      const slotDuration = (slot.end - slot.start) / (1000 * 60); // 分単位に変換
+
+      return slotDuration >= duration;
+    });
+
+    if (viableSlots.length > 0) {
+      dateSlots[dateStr] = viableSlots;
+    }
+
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  // 候補がない場合
+  if (Object.keys(dateSlots).length === 0) {
+    return '指定された期間で、全員が参加可能な時間帯が見つかりませんでした。\n別の期間で試してみてください。';
+  }
+
+  // Gemini APIで最適な時間帯を提案
+  const slotsPrompt = Object.entries(dateSlots)
+    .map(([date, slots]) => {
+      const formattedDate = new Date(date).toLocaleDateString('ja-JP');
+      const timeSlots = slots
+        .map(slot => {
+          const startTime = slot.start.toLocaleTimeString('ja-JP', {
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+          const endTime = slot.end.toLocaleTimeString('ja-JP', {
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+
+          return `${startTime}-${endTime}`;
+        })
+        .join(', ');
+
+      return `${formattedDate}: ${timeSlots}`;
+    })
+    .join('\n');
+
+  try {
+    const apiKey = getGeminiApiKey();
+    const url =
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+
+    const prompt = `
+    以下の日程で、${duration}分のMTGに最適な時間帯を3つまで提案してください：
+
+    ${slotsPrompt}
+
+    以下の点を考慮して提案してください：
+    - なるべく朝早い時間帯を優先
+    - 必要な時間（${duration}分）が確保できる枠を選択
+    - 各候補は「○月○日 XX:XXから」という形式で箇条書き
+    - 最大3つまでの候補を提案
+    `;
+
+    const options = {
+      method: 'post',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      payload: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      }),
+    };
+
+    const response = UrlFetchApp.fetch(url, options);
+    const result = JSON.parse(response.getContentText());
+
+    if (result.candidates && result.candidates[0].content.parts[0].text) {
+      return '以下の時間帯を提案します：\n\n' + result.candidates[0].content.parts[0].text;
+    }
+
+    return '申し訳ありませんが、適切な時間帯を提案できませんでした。';
+  } catch (error) {
+    console.error('Gemini APIでのエラー:', error);
+
+    return '時間帯の分析中にエラーが発生しました。';
+  }
 }
