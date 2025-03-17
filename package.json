@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "description": "SlackからGoogleカレンダーの予定を調整するためのGoogle Apps Scriptプロジェクト",
   "main": "app.gs",
+  "type": "module",
   "scripts": {
     "push": "clasp push",
     "pull": "clasp pull",
     "deploy": "clasp deploy",
     "open": "clasp open",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "lint:fix": "eslint --fix .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky"
