@@ -580,8 +580,8 @@ function analyzeAvailableTimeSlots(events, targetDate) {
 async function suggestBestTimeSlot(availableSlots, requiredDuration) {
   try {
     const apiKey = getGeminiApiKey();
-    const url =
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+    // 最新のAPIバージョン（v1）とエンドポイントを使用
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.0-pro:generateContent?key=${apiKey}`;
 
     // 空き時間の情報を整形
     const slotsText = availableSlots
@@ -613,10 +613,7 @@ async function suggestBestTimeSlot(availableSlots, requiredDuration) {
 
     const options = {
       method: 'post',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      contentType: 'application/json',
       payload: JSON.stringify({
         contents: [
           {
@@ -628,6 +625,7 @@ async function suggestBestTimeSlot(availableSlots, requiredDuration) {
           },
         ],
       }),
+      muteHttpExceptions: true,
     };
 
     const response = UrlFetchApp.fetch(url, options);
@@ -821,8 +819,7 @@ async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
 
   try {
     const apiKey = getGeminiApiKey();
-    const url =
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
     const prompt = `
     以下の日程で、${duration}分のMTGに最適な時間帯を3つまで提案してください：
@@ -830,7 +827,6 @@ async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
     ${slotsPrompt}
 
     以下の点を考慮して提案してください：
-    - なるべく朝早い時間帯を優先
     - 必要な時間（${duration}分）が確保できる枠を選択
     - 各候補は「○月○日 XX:XXから」という形式で箇条書き
     - 最大3つまでの候補を提案
@@ -838,10 +834,7 @@ async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
 
     const options = {
       method: 'post',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      contentType: 'application/json',
       payload: JSON.stringify({
         contents: [
           {
@@ -853,19 +846,34 @@ async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
           },
         ],
       }),
+      muteHttpExceptions: true,
     };
 
     const response = UrlFetchApp.fetch(url, options);
-    const result = JSON.parse(response.getContentText());
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+
+    // レスポンスのステータスコードを確認
+    if (responseCode !== 200) {
+      console.error(`Gemini APIエラー: ステータスコード ${responseCode}, 内容: ${responseText}`);
+
+      return `時間帯の分析中にエラーが発生しました。\n\nエラー詳細:\nステータスコード: ${responseCode}\nレスポンス: ${responseText}`;
+    }
+
+    const result = JSON.parse(responseText);
 
     if (result.candidates && result.candidates[0].content.parts[0].text) {
       return '以下の時間帯を提案します：\n\n' + result.candidates[0].content.parts[0].text;
     }
+    // 期待されるレスポンス形式でない場合
+    console.error(`Gemini APIの期待外のレスポンス形式: ${JSON.stringify(result)}`);
 
-    return '申し訳ありませんが、適切な時間帯を提案できませんでした。';
+    return `時間帯の分析中にエラーが発生しました。\n\nAPI応答の形式が予期せぬ形式でした。\nレスポンス: ${JSON.stringify(result)}`;
   } catch (error) {
     console.error('Gemini APIでのエラー:', error);
+    const errorMessage = error.toString();
+    const errorStack = error.stack ? `\nスタックトレース: ${error.stack}` : '';
 
-    return '時間帯の分析中にエラーが発生しました。';
+    return `時間帯の分析中にエラーが発生しました。\n\nエラー詳細: ${errorMessage}${errorStack}`;
   }
 }
