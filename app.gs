@@ -456,11 +456,29 @@ function getUserCalendarEvents(email, date) {
 
     const events = calendar.getEvents(startTime, endTime);
 
-    return events.map(event => ({
-      title: event.getTitle(),
-      startTime: event.getStartTime(),
-      endTime: event.getEndTime(),
-    }));
+    return events
+      .filter(event => {
+        // 終日イベントを除外
+        if (event.isAllDayEvent()) return false;
+
+        // 長時間イベント（8時間以上）で、特定のキーワードを含むものを除外
+        const duration = (event.getEndTime() - event.getStartTime()) / (1000 * 60 * 60); // 時間単位
+        const title = event.getTitle().toLowerCase();
+        if (
+          duration >= 8 &&
+          (title.includes('作業') || title.includes('work') || title.includes('予定'))
+        ) {
+          return false;
+        }
+
+        return true;
+      })
+      .map(event => ({
+        title: event.getTitle(),
+        startTime: event.getStartTime(),
+        endTime: event.getEndTime(),
+        isAllDay: event.isAllDayEvent(),
+      }));
   } catch (error) {
     console.error(`予定の取得中にエラーが発生しました: ${error}`);
 
@@ -691,18 +709,55 @@ function extractMeetingDuration(text) {
  * @return {Promise<string>} 提案メッセージ
  */
 async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
+  // デバッグ情報を収集する配列
+  const debugInfo = [];
+  debugInfo.push(
+    `分析開始: 
+    期間 ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}, 
+    所要時間: ${duration}分`
+  );
+  debugInfo.push(`イベント総数: ${allEvents.length}`);
+
   // 日付ごとの空き時間を分析
   const dateSlots = {};
   const currentDate = new Date(startDate);
 
   while (currentDate <= endDate) {
     const dateStr = currentDate.toISOString().split('T')[0];
+    debugInfo.push(`分析中の日付: ${dateStr}`);
+
     const dayEvents = allEvents
       .filter(e => e.date.toISOString().split('T')[0] === dateStr)
       .map(e => e.events)
       .flat();
 
+    debugInfo.push(`${dateStr}のイベント数: ${dayEvents.length}`);
+
+    // 日付ごとのイベントの詳細をデバッグ出力
+    if (dayEvents.length > 0) {
+      debugInfo.push(`${dateStr}のイベント詳細:`);
+      dayEvents.forEach((event, index) => {
+        if (event && event.startTime && event.endTime) {
+          debugInfo.push(
+            `- イベント${index + 1}: ${event.title} 
+            (${event.startTime.toLocaleTimeString()}-${event.endTime.toLocaleTimeString()})`
+          );
+        } else {
+          debugInfo.push(`- イベント${index + 1}: 無効なイベントデータ`);
+        }
+      });
+    }
+
     const availableSlots = analyzeAvailableTimeSlots(dayEvents, currentDate);
+    debugInfo.push(`${dateStr}の空き時間枠: ${availableSlots.length}個`);
+
+    if (availableSlots.length > 0) {
+      availableSlots.forEach((slot, index) => {
+        debugInfo.push(
+          `- 空き時間${index + 1}: ${slot.start.toLocaleTimeString()}-${slot.end.toLocaleTimeString()}`
+        );
+      });
+    }
 
     // duration分以上の空き時間枠のみを抽出
     const viableSlots = availableSlots.filter(slot => {
@@ -711,17 +766,35 @@ async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
       return slotDuration >= duration;
     });
 
+    debugInfo.push(`${dateStr}の有効な空き時間枠（${duration}分以上）: ${viableSlots.length}個`);
+
     if (viableSlots.length > 0) {
       dateSlots[dateStr] = viableSlots;
+      viableSlots.forEach((slot, index) => {
+        debugInfo.push(
+          `- 有効時間${index + 1}: ${slot.start.toLocaleTimeString()}-${slot.end.toLocaleTimeString()}`
+        );
+      });
     }
 
-    currentDate.setDate(currentDate.getDate() + 1);
+    // 次の日に進める
+    const nextDate = new Date(currentDate);
+    nextDate.setDate(nextDate.getDate() + 1);
+    currentDate.setTime(nextDate.getTime());
   }
 
   // 候補がない場合
   if (Object.keys(dateSlots).length === 0) {
-    return '指定された期間で、全員が参加可能な時間帯が見つかりませんでした。\n別の期間で試してみてください。';
+    debugInfo.push('候補日なし: 適切な空き時間枠が見つかりませんでした');
+
+    // デバッグ情報を返す
+    return (
+      '指定された期間で、全員が参加可能な時間帯が見つかりませんでした。\n別の期間で試してみてください。\n\n【デバッグ情報】\n' +
+      debugInfo.join('\n')
+    );
   }
+
+  debugInfo.push(`候補日あり: ${Object.keys(dateSlots).length}日`);
 
   // Gemini APIで最適な時間帯を提案
   const slotsPrompt = Object.entries(dateSlots)
