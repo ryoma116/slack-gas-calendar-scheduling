@@ -14,7 +14,22 @@ function doPost(e) {
 
   // イベントの場合（非同期で処理）
   if (params.type === 'event_callback') {
-    // まず200 OKを返す
+    // イベントIDを取得して重複リクエストをチェック
+    const eventId = params.event_id;
+    const cache = CacheService.getScriptCache();
+    const cachedEvent = cache.get(eventId);
+
+    if (cachedEvent) {
+      console.log(`重複イベント ${eventId} をスキップします`);
+
+      return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(
+        ContentService.MimeType.JSON
+      );
+    }
+
+    // イベントをキャッシュに保存（有効期限30分）
+    cache.put(eventId, 'processed', 30 * 60);
+
     processEventAsync(params.event);
 
     return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(
