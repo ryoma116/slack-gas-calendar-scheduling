@@ -41,7 +41,6 @@ export default [
       'no-nested-ternary': 'error',
       'no-else-return': 'error',
       'newline-before-return': 'error',
-      'max-len': ['error', { code: 100 }],
       'space-before-function-paren': [
         'error',
         {

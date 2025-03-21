@@ -14,7 +14,22 @@ function doPost(e) {
 
   // イベントの場合（非同期で処理）
   if (params.type === 'event_callback') {
-    // まず200 OKを返す
+    // イベントIDを取得して重複リクエストをチェック
+    const eventId = params.event_id;
+    const cache = CacheService.getScriptCache();
+    const cachedEvent = cache.get(eventId);
+
+    if (cachedEvent) {
+      console.log(`重複イベント ${eventId} をスキップします`);
+
+      return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(
+        ContentService.MimeType.JSON
+      );
+    }
+
+    // イベントをキャッシュに保存（有効期限30分）
+    cache.put(eventId, 'processed', 30 * 60);
+
     processEventAsync(params.event);
 
     return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(
@@ -456,11 +471,29 @@ function getUserCalendarEvents(email, date) {
 
     const events = calendar.getEvents(startTime, endTime);
 
-    return events.map(event => ({
-      title: event.getTitle(),
-      startTime: event.getStartTime(),
-      endTime: event.getEndTime(),
-    }));
+    return events
+      .filter(event => {
+        // 終日イベントを除外
+        if (event.isAllDayEvent()) return false;
+
+        // 長時間イベント（8時間以上）で、特定のキーワードを含むものを除外
+        const duration = (event.getEndTime() - event.getStartTime()) / (1000 * 60 * 60); // 時間単位
+        const title = event.getTitle().toLowerCase();
+        if (
+          duration >= 8 &&
+          (title.includes('作業') || title.includes('work') || title.includes('予定'))
+        ) {
+          return false;
+        }
+
+        return true;
+      })
+      .map(event => ({
+        title: event.getTitle(),
+        startTime: event.getStartTime(),
+        endTime: event.getEndTime(),
+        isAllDay: event.isAllDayEvent(),
+      }));
   } catch (error) {
     console.error(`予定の取得中にエラーが発生しました: ${error}`);
 
@@ -562,8 +595,8 @@ function analyzeAvailableTimeSlots(events, targetDate) {
 async function suggestBestTimeSlot(availableSlots, requiredDuration) {
   try {
     const apiKey = getGeminiApiKey();
-    const url =
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+    // 最新のAPIバージョン（v1）とエンドポイントを使用
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.0-pro:generateContent?key=${apiKey}`;
 
     // 空き時間の情報を整形
     const slotsText = availableSlots
@@ -595,10 +628,7 @@ async function suggestBestTimeSlot(availableSlots, requiredDuration) {
 
     const options = {
       method: 'post',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      contentType: 'application/json',
       payload: JSON.stringify({
         contents: [
           {
@@ -610,6 +640,7 @@ async function suggestBestTimeSlot(availableSlots, requiredDuration) {
           },
         ],
       }),
+      muteHttpExceptions: true,
     };
 
     const response = UrlFetchApp.fetch(url, options);
@@ -691,18 +722,55 @@ function extractMeetingDuration(text) {
  * @return {Promise<string>} 提案メッセージ
  */
 async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
+  // デバッグ情報を収集する配列
+  const debugInfo = [];
+  debugInfo.push(
+    `分析開始: 
+    期間 ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}, 
+    所要時間: ${duration}分`
+  );
+  debugInfo.push(`イベント総数: ${allEvents.length}`);
+
   // 日付ごとの空き時間を分析
   const dateSlots = {};
   const currentDate = new Date(startDate);
 
   while (currentDate <= endDate) {
     const dateStr = currentDate.toISOString().split('T')[0];
+    debugInfo.push(`分析中の日付: ${dateStr}`);
+
     const dayEvents = allEvents
       .filter(e => e.date.toISOString().split('T')[0] === dateStr)
       .map(e => e.events)
       .flat();
 
+    debugInfo.push(`${dateStr}のイベント数: ${dayEvents.length}`);
+
+    // 日付ごとのイベントの詳細をデバッグ出力
+    if (dayEvents.length > 0) {
+      debugInfo.push(`${dateStr}のイベント詳細:`);
+      dayEvents.forEach((event, index) => {
+        if (event && event.startTime && event.endTime) {
+          debugInfo.push(
+            `- イベント${index + 1}: ${event.title} 
+            (${event.startTime.toLocaleTimeString()}-${event.endTime.toLocaleTimeString()})`
+          );
+        } else {
+          debugInfo.push(`- イベント${index + 1}: 無効なイベントデータ`);
+        }
+      });
+    }
+
     const availableSlots = analyzeAvailableTimeSlots(dayEvents, currentDate);
+    debugInfo.push(`${dateStr}の空き時間枠: ${availableSlots.length}個`);
+
+    if (availableSlots.length > 0) {
+      availableSlots.forEach((slot, index) => {
+        debugInfo.push(
+          `- 空き時間${index + 1}: ${slot.start.toLocaleTimeString()}-${slot.end.toLocaleTimeString()}`
+        );
+      });
+    }
 
     // duration分以上の空き時間枠のみを抽出
     const viableSlots = availableSlots.filter(slot => {
@@ -711,17 +779,35 @@ async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
       return slotDuration >= duration;
     });
 
+    debugInfo.push(`${dateStr}の有効な空き時間枠（${duration}分以上）: ${viableSlots.length}個`);
+
     if (viableSlots.length > 0) {
       dateSlots[dateStr] = viableSlots;
+      viableSlots.forEach((slot, index) => {
+        debugInfo.push(
+          `- 有効時間${index + 1}: ${slot.start.toLocaleTimeString()}-${slot.end.toLocaleTimeString()}`
+        );
+      });
     }
 
-    currentDate.setDate(currentDate.getDate() + 1);
+    // 次の日に進める
+    const nextDate = new Date(currentDate);
+    nextDate.setDate(nextDate.getDate() + 1);
+    currentDate.setTime(nextDate.getTime());
   }
 
   // 候補がない場合
   if (Object.keys(dateSlots).length === 0) {
-    return '指定された期間で、全員が参加可能な時間帯が見つかりませんでした。\n別の期間で試してみてください。';
+    debugInfo.push('候補日なし: 適切な空き時間枠が見つかりませんでした');
+
+    // デバッグ情報を返す
+    return (
+      '指定された期間で、全員が参加可能な時間帯が見つかりませんでした。\n別の期間で試してみてください。\n\n【デバッグ情報】\n' +
+      debugInfo.join('\n')
+    );
   }
+
+  debugInfo.push(`候補日あり: ${Object.keys(dateSlots).length}日`);
 
   // Gemini APIで最適な時間帯を提案
   const slotsPrompt = Object.entries(dateSlots)
@@ -748,8 +834,7 @@ async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
 
   try {
     const apiKey = getGeminiApiKey();
-    const url =
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
     const prompt = `
     以下の日程で、${duration}分のMTGに最適な時間帯を3つまで提案してください：
@@ -757,7 +842,6 @@ async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
     ${slotsPrompt}
 
     以下の点を考慮して提案してください：
-    - なるべく朝早い時間帯を優先
     - 必要な時間（${duration}分）が確保できる枠を選択
     - 各候補は「○月○日 XX:XXから」という形式で箇条書き
     - 最大3つまでの候補を提案
@@ -765,10 +849,7 @@ async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
 
     const options = {
       method: 'post',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      contentType: 'application/json',
       payload: JSON.stringify({
         contents: [
           {
@@ -780,19 +861,34 @@ async function analyzeMeetingSlots(allEvents, startDate, endDate, duration) {
           },
         ],
       }),
+      muteHttpExceptions: true,
     };
 
     const response = UrlFetchApp.fetch(url, options);
-    const result = JSON.parse(response.getContentText());
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+
+    // レスポンスのステータスコードを確認
+    if (responseCode !== 200) {
+      console.error(`Gemini APIエラー: ステータスコード ${responseCode}, 内容: ${responseText}`);
+
+      return `時間帯の分析中にエラーが発生しました。\n\nエラー詳細:\nステータスコード: ${responseCode}\nレスポンス: ${responseText}`;
+    }
+
+    const result = JSON.parse(responseText);
 
     if (result.candidates && result.candidates[0].content.parts[0].text) {
       return '以下の時間帯を提案します：\n\n' + result.candidates[0].content.parts[0].text;
     }
+    // 期待されるレスポンス形式でない場合
+    console.error(`Gemini APIの期待外のレスポンス形式: ${JSON.stringify(result)}`);
 
-    return '申し訳ありませんが、適切な時間帯を提案できませんでした。';
+    return `時間帯の分析中にエラーが発生しました。\n\nAPI応答の形式が予期せぬ形式でした。\nレスポンス: ${JSON.stringify(result)}`;
   } catch (error) {
     console.error('Gemini APIでのエラー:', error);
+    const errorMessage = error.toString();
+    const errorStack = error.stack ? `\nスタックトレース: ${error.stack}` : '';
 
-    return '時間帯の分析中にエラーが発生しました。';
+    return `時間帯の分析中にエラーが発生しました。\n\nエラー詳細: ${errorMessage}${errorStack}`;
   }
 }
